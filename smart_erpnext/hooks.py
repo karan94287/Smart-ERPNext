@@ -25,12 +25,19 @@ app_license = "mit"
 # ------------------
 
 # include js, css files in header of desk.html
-# app_include_css = "/assets/smart_erpnext/css/smart_erpnext.css"
-# app_include_js = "/assets/smart_erpnext/js/smart_erpnext.js"
+app_include_js = [
+	"/assets/smart_erpnext/lib/face-api.min.js",
+	"/assets/smart_erpnext/js/face_api_utils.js",
+]
 
 # include js, css files in header of web template
-# web_include_css = "/assets/smart_erpnext/css/smart_erpnext.css"
-# web_include_js = "/assets/smart_erpnext/js/smart_erpnext.js"
+web_include_css = "/assets/smart_erpnext/css/face_login.css"
+web_include_js = [
+	"/assets/smart_erpnext/js/login_route_hook.js",
+	"/assets/smart_erpnext/lib/face-api.min.js",
+	"/assets/smart_erpnext/js/face_api_utils.js",
+	"/assets/smart_erpnext/js/face_login.js",
+]
 
 # include custom scss in every website theme (without file extension ".scss")
 # website_theme_scss = "smart_erpnext/public/scss/website"
@@ -43,7 +50,7 @@ app_license = "mit"
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-# doctype_js = {"doctype" : "public/js/doctype.js"}
+doctype_js = {"User": "public/js/user_face.js"}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -83,7 +90,7 @@ app_license = "mit"
 # ------------
 
 # before_install = "smart_erpnext.install.before_install"
-# after_install = "smart_erpnext.install.after_install"
+after_install = "smart_erpnext.install.after_install"
 
 # Uninstallation
 # ------------
