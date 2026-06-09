@@ -11,20 +11,19 @@ app_license = "mit"
 # required_apps = []
 
 # Each item in the list will be shown as an app in the apps page
-# add_to_apps_screen = [
-# 	{
-# 		"name": "smart_erpnext",
-# 		"logo": "/assets/smart_erpnext/logo.png",
-# 		"title": "Smart ERPNext",
-# 		"route": "/smart_erpnext",
-# 		"has_permission": "smart_erpnext.api.permission.has_app_permission"
-# 	}
-# ]
+add_to_apps_screen = [
+	{
+		"name": "smart_erpnext",
+		"title": "Smart ERPNext",
+		"route": "/app/warehouse-3d",
+	}
+]
 
 # Includes in <head>
 # ------------------
 
 # include js, css files in header of desk.html
+app_include_css = "/assets/smart_erpnext/css/warehouse_3d.css"
 app_include_js = [
 	"/assets/smart_erpnext/lib/face-api.min.js",
 	"/assets/smart_erpnext/js/face_api_utils.js",
