@@ -91,6 +91,7 @@ smart_erpnext.face_login.show = function () {
 	}
 
 	$("section.for-face-login").toggle(true);
+	smart_erpnext.face_login.refresh_status();
 	smart_erpnext.face_login.start_scanner();
 };
 
@@ -109,6 +110,17 @@ smart_erpnext.face_login.ensure_section = function () {
 			</div>
 			<div class="login-content page-card face-login-card">
 				<div class="face-login-body">
+					<div class="form-group face-login-email-wrap">
+						<label for="face-login-email">${__("Email or Username")}</label>
+						<input
+							type="text"
+							id="face-login-email"
+							class="form-control"
+							placeholder="${__("Optional — leave blank to match any registered user")}"
+							autocomplete="username"
+						/>
+						<p class="help-box small text-muted face-login-hint"></p>
+					</div>
 					<video id="face-login-video" autoplay muted playsinline></video>
 					<p class="face-login-status text-muted">${__("Preparing camera...")}</p>
 				</div>
@@ -125,6 +137,63 @@ smart_erpnext.face_login.ensure_section = function () {
 	`);
 
 	$("section.for-login").first().before($section);
+
+	const login_email = ($("#login_email").val() || "").trim();
+	if (login_email) {
+		$("#face-login-email").val(login_email);
+	}
+};
+
+smart_erpnext.face_login._get_user_hint = function () {
+	return ($("#face-login-email").val() || $("#login_email").val() || "").trim();
+};
+
+smart_erpnext.face_login.refresh_status = async function () {
+	const user = smart_erpnext.face_login._get_user_hint();
+	const hint = $(".face-login-hint");
+
+	if (!hint.length) {
+		return;
+	}
+
+	try {
+		const response = await frappe.call({
+			method: "smart_erpnext.api.face_login.get_face_login_status",
+			args: { user: user || undefined },
+		});
+		const data = response.message || {};
+
+		if (user && !data.user_exists) {
+			hint.text(__("This user was not found on this site."));
+			return;
+		}
+
+		if (user && data.user_exists && !data.user_registered) {
+			hint.text(
+				__(
+					"Face login is not registered for this user yet. Sign in with password and register from the User form."
+				)
+			);
+			return;
+		}
+
+		if (!data.any_registered) {
+			hint.text(
+				__(
+					"No face login registered yet. An admin must register from User → Register Face from Photo/Camera."
+				)
+			);
+			return;
+		}
+
+		hint.text(
+			user
+				? __("Face login is set up for this user.")
+				: __("Leave blank to match against all registered users.")
+		);
+	} catch (error) {
+		hint.text("");
+	}
 };
 
 smart_erpnext.face_login.start_scanner = async function () {
@@ -201,7 +270,7 @@ smart_erpnext.face_login.verify = async function () {
 			throw new Error(__("No face detected. Center your face and try again."));
 		}
 
-		const user = ($("#login_email").val() || "").trim();
+		const user = smart_erpnext.face_login._get_user_hint();
 		status.text(__("Verifying face..."));
 
 		const response = await frappe.call({
@@ -246,6 +315,10 @@ smart_erpnext.face_login.verify = async function () {
 
 $(document).on("click", ".btn-face-scan", () => {
 	smart_erpnext.face_login.verify();
+});
+
+$(document).on("input", "#face-login-email", () => {
+	smart_erpnext.face_login.refresh_status();
 });
 
 $(document).on("login_rendered", () => {

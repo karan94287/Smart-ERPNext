@@ -6,14 +6,30 @@
 .face-login-body {
 	display: flex;
 	flex-direction: column;
-	align-items: center;
+	align-items: stretch;
 	gap: 12px;
 	padding: 16px;
+}
+
+.face-login-email-wrap {
+	width: 100%;
+	margin: 0;
+}
+
+.face-login-email-wrap label {
+	font-size: 13px;
+	font-weight: 500;
+	margin-bottom: 6px;
+}
+
+.face-login-hint {
+	margin: 6px 0 0;
 }
 
 #face-login-video {
 	width: 100%;
 	max-width: 320px;
+	margin: 0 auto;
 	border-radius: 12px;
 	background: #111;
 	aspect-ratio: 4 / 3;
