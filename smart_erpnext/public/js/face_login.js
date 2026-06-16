@@ -91,6 +91,7 @@ smart_erpnext.face_login.show = function () {
 	}
 
 	$("section.for-face-login").toggle(true);
+	$("#face-login-email").trigger("focus");
 	smart_erpnext.face_login.refresh_status();
 	smart_erpnext.face_login.start_scanner();
 };
@@ -138,15 +139,10 @@ smart_erpnext.face_login.ensure_section = function () {
 	`);
 
 	$("section.for-login").first().before($section);
-
-	const login_email = ($("#login_email").val() || "").trim();
-	if (login_email) {
-		$("#face-login-email").val(login_email);
-	}
 };
 
 smart_erpnext.face_login._get_user_hint = function () {
-	return ($("#face-login-email").val() || $("#login_email").val() || "").trim();
+	return ($("#face-login-email").val() || "").trim();
 };
 
 smart_erpnext.face_login.refresh_status = async function () {
@@ -189,8 +185,8 @@ smart_erpnext.face_login.refresh_status = async function () {
 
 		hint.text(
 			user
-				? __("Only the face registered for this account will be accepted.")
-				: __("Enter your email or username — face login is tied to that specific account.")
+				? __("Face login will sign in as {0} only.", [user])
+				: __("Type the exact username or email for the account you want to sign in to.")
 		);
 	} catch (error) {
 		hint.text("");
@@ -296,7 +292,7 @@ smart_erpnext.face_login.verify = async function () {
 
 		const data = response.message || {};
 		if (data.message === "Logged In" || data.message === "No App") {
-			status.text(__("Success"));
+			status.text(__("Signed in as {0}", [data.user || user]));
 			window.location.href =
 				frappe.utils.sanitise_redirect(frappe.utils.get_url_arg("redirect-to")) ||
 				data.home_page ||

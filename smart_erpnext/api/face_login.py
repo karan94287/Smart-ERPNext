@@ -9,8 +9,8 @@ from frappe.rate_limiter import rate_limit
 from frappe.utils import slug
 
 DESCRIPTOR_LENGTH = 128
-# face-api.js: same person is usually below 0.5; 0.65 was too loose and caused false logins.
-MATCH_THRESHOLD = 0.5
+MATCH_THRESHOLD = 0.45
+DUPLICATE_DESCRIPTOR_DISTANCE = 0.05
 
 
 def _parse_descriptor(descriptor):
@@ -68,16 +68,97 @@ def _resolve_user(user: str) -> str | None:
 	)
 
 
-def _get_candidate_users(user: str | None = None) -> list[dict]:
-	filters = {"enabled": 1, "face_descriptor": ["is", "set"]}
-	if user:
-		filters["name"] = user
+def _get_user_face_meta(user_name: str) -> dict | None:
+	if not user_name or not frappe.db.exists("User", user_name):
+		return None
 
-	return frappe.get_all(
+	return frappe.db.get_value(
 		"User",
-		filters=filters,
-		fields=["name", "face_descriptor", "user_type", "default_workspace", "user_image"],
+		user_name,
+		["name", "enabled", "user_image", "face_descriptor", "face_registered_image"],
+		as_dict=True,
 	)
+
+
+def _has_active_face_login(user_name: str) -> bool:
+	meta = _get_user_face_meta(user_name)
+	if not meta or not meta.enabled:
+		return False
+	if not meta.user_image:
+		return False
+	if not meta.face_descriptor or not str(meta.face_descriptor).strip():
+		return False
+	return bool(_parse_stored_descriptors(meta.face_descriptor))
+
+
+def _clear_face_login(user_name: str, commit: bool = False):
+	frappe.db.set_value(
+		"User",
+		user_name,
+		{"face_descriptor": None, "face_registered_image": None},
+		update_modified=False,
+	)
+	if commit:
+		frappe.db.commit()
+
+
+def clear_stale_face_logins():
+	"""Remove face login data when profile photo is missing or registration image changed."""
+	users = frappe.get_all(
+		"User",
+		filters={"face_descriptor": ["is", "set"]},
+		fields=["name", "user_image", "face_registered_image", "face_descriptor"],
+	)
+
+	for row in users:
+		should_clear = False
+
+		if not row.user_image:
+			should_clear = True
+		elif row.face_registered_image and row.user_image != row.face_registered_image:
+			should_clear = True
+		elif not _parse_stored_descriptors(row.face_descriptor):
+			should_clear = True
+
+		if should_clear:
+			_clear_face_login(row.name)
+
+
+def on_user_validate(doc, method=None):
+	"""Invalidate face login when profile photo is removed or replaced."""
+	if doc.is_new():
+		return
+
+	previous = frappe.db.get_value(
+		"User",
+		doc.name,
+		["user_image", "face_registered_image"],
+		as_dict=True,
+	) or {}
+
+	if not doc.user_image:
+		doc.face_descriptor = None
+		doc.face_registered_image = None
+		return
+
+	if doc.user_image != previous.get("user_image"):
+		doc.face_descriptor = None
+		doc.face_registered_image = None
+
+
+def _get_candidate_users(user: str | None = None) -> list[dict]:
+	if user:
+		meta = _get_user_face_meta(user)
+		if not meta or not _has_active_face_login(user):
+			return []
+		return [meta]
+
+	users = frappe.get_all(
+		"User",
+		filters={"enabled": 1, "face_descriptor": ["is", "set"]},
+		fields=["name", "face_descriptor", "user_image", "face_registered_image"],
+	)
+	return [row for row in users if _has_active_face_login(row.name)]
 
 
 def _descriptor_distance(descriptor: list[float], stored_value) -> float | None:
@@ -93,6 +174,20 @@ def _descriptor_distance(descriptor: list[float], stored_value) -> float | None:
 			best_distance = distance
 
 	return best_distance
+
+
+def _ensure_descriptor_not_used_by_other_user(descriptor: list[float], target_user: str):
+	for candidate in _get_candidate_users():
+		if candidate.name == target_user:
+			continue
+
+		distance = _descriptor_distance(descriptor, candidate.face_descriptor)
+		if distance is not None and distance <= DUPLICATE_DESCRIPTOR_DISTANCE:
+			frappe.throw(
+				_(
+					"This face is already registered for user {0}. Each user must register their own unique face."
+				).format(candidate.name)
+			)
 
 
 def _find_best_match(
@@ -145,18 +240,18 @@ def _login_user(user: str):
 
 def _registration_hint(user: str | None = None) -> str:
 	if user:
-		has_image = frappe.db.get_value("User", user, "user_image")
-		if not has_image:
+		meta = _get_user_face_meta(user)
+		if not meta:
+			return _("User {0} was not found.").format(user)
+		if not meta.user_image:
 			return _(
-				"No profile photo found for {0}. Upload a photo on the User form, then click Register Face for Login."
+				"Profile photo removed for {0}. Upload a new photo and register face login again."
 			).format(user)
 		return _(
-			"Face is not registered for {0}. Open that User record and click Register Face for Login."
+			"Face login is not active for {0}. Open that User and click Register Face from Camera."
 		).format(user)
 
-	return _(
-		"No faces are registered yet. Sign in with password, open User, upload a profile photo, and click Register Face for Login."
-	)
+	return _("No active face logins found. Register face login from the User form first.")
 
 
 @frappe.whitelist(allow_guest=True)
@@ -175,14 +270,14 @@ def verify_and_login(descriptor, user=None):
 	if not resolved_user:
 		frappe.throw(_("User not found."), frappe.AuthenticationError)
 
-	if not frappe.db.get_value("User", resolved_user, "face_descriptor"):
+	if not _has_active_face_login(resolved_user):
 		frappe.throw(_registration_hint(resolved_user), frappe.AuthenticationError)
 
 	match, distance = _find_best_match(parsed_descriptor, resolved_user, strict_user=True)
 
-	if not match:
+	if not match or match.name != resolved_user:
 		message = _(
-			"Face does not match {0}. Only the registered person can sign in with this account."
+			"Face does not match {0}. Only the person who registered for this account can sign in."
 		).format(resolved_user)
 		if distance is not None:
 			frappe.logger().info(
@@ -194,11 +289,11 @@ def verify_and_login(descriptor, user=None):
 			)
 		frappe.throw(message, frappe.AuthenticationError)
 
-	_login_user(match.name)
+	_login_user(resolved_user)
 	return {
 		"message": frappe.local.response.get("message"),
 		"home_page": frappe.local.response.get("home_page"),
-		"user": match.name,
+		"user": resolved_user,
 	}
 
 
@@ -214,12 +309,17 @@ def save_face_descriptor(descriptor, user=None, append=0):
 	if target_user != frappe.session.user and not frappe.has_permission("User", "write", target_user):
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 
+	user_image = frappe.db.get_value("User", target_user, "user_image")
+	if not user_image:
+		frappe.throw(_("Upload and save a profile photo before registering face login."))
+
+	_ensure_descriptor_not_used_by_other_user(parsed_descriptor, target_user)
+
 	existing = _parse_stored_descriptors(
 		frappe.db.get_value("User", target_user, "face_descriptor")
 	)
 
 	if int(append) and existing:
-		# Keep up to 3 descriptors (photo + webcam samples) for better matching.
 		descriptors = existing[:2] + [parsed_descriptor]
 	else:
 		descriptors = [parsed_descriptor]
@@ -227,12 +327,28 @@ def save_face_descriptor(descriptor, user=None, append=0):
 	frappe.db.set_value(
 		"User",
 		target_user,
-		"face_descriptor",
-		json.dumps(descriptors if len(descriptors) > 1 else descriptors[0]),
+		{
+			"face_descriptor": json.dumps(descriptors if len(descriptors) > 1 else descriptors[0]),
+			"face_registered_image": user_image,
+		},
 	)
 	frappe.db.commit()
 
 	return {"ok": True, "user": target_user, "samples": len(descriptors)}
+
+
+@frappe.whitelist()
+def clear_face_descriptor(user=None):
+	target_user = _resolve_user(user) if user else frappe.session.user
+
+	if target_user == "Guest":
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+	if target_user != frappe.session.user and not frappe.has_permission("User", "write", target_user):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+	_clear_face_login(target_user, commit=True)
+	return {"ok": True, "user": target_user}
 
 
 @frappe.whitelist(allow_guest=True)
@@ -249,7 +365,7 @@ def get_face_login_status(user=None):
 	return {
 		"any_registered": bool(registered_users),
 		"user": resolved_user,
-		"user_registered": bool(_get_candidate_users(resolved_user)) if resolved_user else False,
+		"user_registered": _has_active_face_login(resolved_user) if resolved_user else False,
 		"user_exists": bool(resolved_user and frappe.db.exists("User", resolved_user)),
 		"has_profile_image": bool(
 			resolved_user and frappe.db.get_value("User", resolved_user, "user_image")

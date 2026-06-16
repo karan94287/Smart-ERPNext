@@ -4,25 +4,43 @@ import frappe
 def after_install():
 	_create_face_descriptor_field()
 	_create_warehouse_3d_fields()
+	_cleanup_face_login_data()
+
+
+def _cleanup_face_login_data():
+	from smart_erpnext.api.face_login import clear_stale_face_logins
+
+	clear_stale_face_logins()
 
 
 def _create_face_descriptor_field():
-	if frappe.db.exists("Custom Field", {"dt": "User", "fieldname": "face_descriptor"}):
-		return
-
-	frappe.get_doc(
+	fields = [
 		{
-			"doctype": "Custom Field",
-			"dt": "User",
 			"fieldname": "face_descriptor",
 			"label": "Face Descriptor",
 			"fieldtype": "Long Text",
 			"hidden": 1,
 			"read_only": 1,
 			"insert_after": "user_image",
-			"description": "Auto-generated face descriptor used for face login.",
-		}
-	).insert(ignore_permissions=True)
+			"description": "Auto-generated face data used only for face login. Cleared when profile photo changes.",
+		},
+		{
+			"fieldname": "face_registered_image",
+			"label": "Face Registered Image",
+			"fieldtype": "Data",
+			"hidden": 1,
+			"read_only": 1,
+			"insert_after": "face_descriptor",
+			"description": "Profile image URL used when face login was registered.",
+		},
+	]
+
+	for field in fields:
+		if frappe.db.exists("Custom Field", {"dt": "User", "fieldname": field["fieldname"]}):
+			continue
+		frappe.get_doc({"doctype": "Custom Field", "dt": "User", **field}).insert(
+			ignore_permissions=True
+		)
 
 
 def _create_warehouse_3d_fields():

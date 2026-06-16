@@ -143,13 +143,11 @@ after_install = "smart_erpnext.install.after_install"
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+doc_events = {
+	"User": {
+		"validate": "smart_erpnext.api.face_login.on_user_validate",
+	}
+}
 
 # Scheduled Tasks
 # ---------------
