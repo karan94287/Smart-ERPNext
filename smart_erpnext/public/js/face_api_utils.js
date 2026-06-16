@@ -45,9 +45,16 @@ smart_erpnext.face._resolve_url = function (url) {
 		return "";
 	}
 	if (url.startsWith("http://") || url.startsWith("https://")) {
-		return url;
+		return encodeURI(url);
 	}
-	return `${window.location.origin}${url.startsWith("/") ? "" : "/"}${url}`;
+
+	const path = url.startsWith("/") ? url : `/${url}`;
+	const encoded_path = path
+		.split("/")
+		.map((segment, index) => (index === 0 ? segment : encodeURIComponent(segment)))
+		.join("/");
+
+	return `${window.location.origin}${encoded_path}`;
 };
 
 smart_erpnext.face.load_image = async function (url) {

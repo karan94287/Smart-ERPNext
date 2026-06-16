@@ -12,31 +12,71 @@ frappe.ui.form.on("User", {
 			smart_erpnext.user_face.register_from_camera(frm);
 		});
 
-		if (frm.doc.user_image && !frm.doc.face_descriptor) {
-			frm.dashboard.set_headline_alert(
-				__(
-					"Face login is not set up yet. Upload a clear photo, save, then click Register Face from Photo or Camera."
-				),
-				"orange"
-			);
-		} else if (frm.doc.face_descriptor) {
-			frm.dashboard.set_headline_alert(__("Face login is registered for this user."), "green");
-		}
+		smart_erpnext.user_face.update_status_banner(frm);
 	},
 
 	user_image(frm) {
+		smart_erpnext.user_face.update_status_banner(frm);
+	},
+
+	after_save(frm) {
 		if (frm.doc.user_image && !frm.doc.face_descriptor) {
-			frm.dashboard.set_headline_alert(
-				__(
-					"Save the user and click Register Face from Photo or Camera to enable face login."
-				),
-				"blue"
+			frappe.show_alert(
+				{
+					message: __(
+						"Profile photo saved. Now click Register Face from Camera to enable face login."
+					),
+					indicator: "blue",
+				},
+				8
 			);
 		}
 	},
 });
 
 frappe.provide("smart_erpnext.user_face");
+
+smart_erpnext.user_face.update_status_banner = function (frm) {
+	if (!frm.doc.user_image) {
+		frm.dashboard.set_headline_alert(
+			__(
+				"Step 1: Upload a clear front-facing profile photo and click Save."
+			),
+			"orange"
+		);
+		return;
+	}
+
+	if (frm.is_dirty()) {
+		frm.dashboard.set_headline_alert(
+			__(
+				"Step 2: Click Save first, then use Register Face from Photo or Camera."
+			),
+			"orange"
+		);
+		return;
+	}
+
+	if (!frm.doc.face_descriptor) {
+		frm.dashboard.set_headline_alert(
+			__(
+				"Step 3: Photo is saved. Click Register Face from Camera (recommended) to finish setup."
+			),
+			"orange"
+		);
+		return;
+	}
+
+	frm.dashboard.set_headline_alert(__("Face login is registered for this user."), "green");
+};
+
+smart_erpnext.user_face._ensure_saved = async function (frm) {
+	if (!frm.is_dirty()) {
+		return;
+	}
+
+	await frm.save();
+};
 
 smart_erpnext.user_face._save_descriptor = async function (frm, descriptor, append = 0) {
 	await frappe.call({
@@ -49,6 +89,7 @@ smart_erpnext.user_face._save_descriptor = async function (frm, descriptor, appe
 	});
 
 	await frm.reload_doc();
+	smart_erpnext.user_face.update_status_banner(frm);
 	frappe.show_alert({
 		message: __("Face registered for login."),
 		indicator: "green",
@@ -58,6 +99,12 @@ smart_erpnext.user_face._save_descriptor = async function (frm, descriptor, appe
 smart_erpnext.user_face.register_from_photo = async function (frm) {
 	if (!frm.doc.user_image) {
 		frappe.msgprint(__("Upload a profile photo first."));
+		return;
+	}
+
+	try {
+		await smart_erpnext.user_face._ensure_saved(frm);
+	} catch (error) {
 		return;
 	}
 
@@ -71,7 +118,11 @@ smart_erpnext.user_face.register_from_photo = async function (frm) {
 	} catch (error) {
 		frappe.msgprint({
 			title: __("Face Registration Failed"),
-			message: error.message || __("Could not register face from this photo."),
+			message:
+				error.message ||
+				__(
+					"Could not register face from this photo. Try Register Face from Camera instead."
+				),
 			indicator: "red",
 		});
 	} finally {
@@ -80,6 +131,12 @@ smart_erpnext.user_face.register_from_photo = async function (frm) {
 };
 
 smart_erpnext.user_face.register_from_camera = async function (frm) {
+	try {
+		await smart_erpnext.user_face._ensure_saved(frm);
+	} catch (error) {
+		return;
+	}
+
 	const dialog = new frappe.ui.Dialog({
 		title: __("Register Face from Camera"),
 		fields: [
@@ -88,7 +145,7 @@ smart_erpnext.user_face.register_from_camera = async function (frm) {
 				fieldname: "camera_preview",
 				options: `
 					<div class="face-register-camera-wrap">
-						<video id="face-register-video" autoplay muted playsinline style="width:100%;border-radius:8px;background:#111;"></video>
+						<video id="face-register-video" autoplay muted playsinline style="width:100%;border-radius:8px;background:#111;min-height:220px;"></video>
 						<p class="text-muted small face-register-status">${__("Starting camera...")}</p>
 					</div>
 				`,

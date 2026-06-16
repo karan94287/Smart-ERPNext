@@ -171,7 +171,7 @@ smart_erpnext.face_login.refresh_status = async function () {
 		if (user && data.user_exists && !data.user_registered) {
 			hint.text(
 				__(
-					"Face login is not registered for this user yet. Sign in with password and register from the User form."
+					"Face not registered yet. Sign in with password → open User → Save photo → click Register Face from Camera."
 				)
 			);
 			return;
