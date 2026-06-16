@@ -11,7 +11,7 @@
 
 		login.face_login = function () {
 			if (window.smart_erpnext && smart_erpnext.face_login) {
-				smart_erpnext.face_login.show();
+				smart_erpnext.face_login.open();
 			}
 		};
 
@@ -34,7 +34,6 @@
 				return routeFn;
 			},
 			set() {
-				// Keep the safe route even when Frappe assigns login.route.
 				routeFn = function () {
 					let route = window.location.hash.slice(1);
 					if (!route) {

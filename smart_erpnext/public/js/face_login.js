@@ -1,12 +1,18 @@
 frappe.provide("smart_erpnext.face_login");
 
 smart_erpnext.face_login._starting = false;
+smart_erpnext.face_login._initialized = false;
 
 smart_erpnext.face_login.init = function () {
 	if (!window.location.pathname.includes("/login")) {
 		return;
 	}
 
+	if (smart_erpnext.face_login._initialized) {
+		return;
+	}
+
+	smart_erpnext.face_login._initialized = true;
 	smart_erpnext.face_login.patch_login_route();
 	smart_erpnext.face_login.ensure_section();
 	smart_erpnext.face_login.add_button();
@@ -20,11 +26,9 @@ smart_erpnext.face_login.patch_login_route = function () {
 
 	login._face_login_patched = true;
 
-	if (typeof login.face_login !== "function") {
-		login.face_login = function () {
-			smart_erpnext.face_login.show();
-		};
-	}
+	login.face_login = function () {
+		smart_erpnext.face_login.open();
+	};
 
 	const original_reset = login.reset_sections;
 	login.reset_sections = function (hide) {
@@ -63,7 +67,7 @@ smart_erpnext.face_login.add_button = function () {
 	$button.on("click", (event) => {
 		event.preventDefault();
 		window.location.hash = "face-login";
-		smart_erpnext.face_login.show();
+		smart_erpnext.face_login.open();
 	});
 };
 
@@ -76,29 +80,47 @@ smart_erpnext.face_login.bind_hash_route = function () {
 
 	$(window).on("hashchange", () => {
 		if (window.location.hash === "#face-login") {
-			smart_erpnext.face_login.show();
+			smart_erpnext.face_login.open();
 		}
 	});
+};
 
-	if (window.location.hash === "#face-login") {
-		smart_erpnext.face_login.show();
-	}
+smart_erpnext.face_login.open = function () {
+	smart_erpnext.face_login.init();
+	smart_erpnext.face_login.show();
 };
 
 smart_erpnext.face_login.show = function () {
+	smart_erpnext.face_login.ensure_section();
+
 	if (typeof login !== "undefined" && login.reset_sections) {
 		login.reset_sections();
 	}
 
-	$("section.for-face-login").toggle(true);
-	$("#face-login-email").trigger("focus");
+	const $section = $("section.for-face-login");
+	$section.toggle(true);
+
+	const $email = $("#face-login-email");
+	if ($email.length) {
+		$email.trigger("focus");
+	}
+
 	smart_erpnext.face_login.refresh_status();
-	smart_erpnext.face_login.start_scanner();
+
+	// Wait for the section to be visible before attaching the camera stream.
+	requestAnimationFrame(() => {
+		smart_erpnext.face_login.start_scanner();
+	});
 };
 
 smart_erpnext.face_login.ensure_section = function () {
-	if ($("section.for-face-login").length) {
+	const $existing = $("section.for-face-login");
+	if ($existing.length && $existing.find("#face-login-video").length) {
 		return;
+	}
+
+	if ($existing.length) {
+		$existing.remove();
 	}
 
 	const logo_src = $(".app-logo").first().attr("src") || "";
@@ -138,7 +160,16 @@ smart_erpnext.face_login.ensure_section = function () {
 		</section>
 	`);
 
-	$("section.for-login").first().before($section);
+	const $anchor = $("section.for-login").first();
+	if ($anchor.length) {
+		$anchor.before($section);
+	} else {
+		$(".page-content-wrapper").first().append($section);
+	}
+};
+
+smart_erpnext.face_login.get_video_element = function () {
+	return document.getElementById("face-login-video");
 };
 
 smart_erpnext.face_login._get_user_hint = function () {
@@ -177,7 +208,7 @@ smart_erpnext.face_login.refresh_status = async function () {
 		if (!data.any_registered) {
 			hint.text(
 				__(
-					"No face login registered yet. An admin must register from User → Register Face from Photo/Camera."
+					"No face login registered yet. An admin must register from User → Register Face from Camera."
 				)
 			);
 			return;
@@ -198,27 +229,51 @@ smart_erpnext.face_login.start_scanner = async function () {
 		return;
 	}
 
+	smart_erpnext.face_login.ensure_section();
+	const video = smart_erpnext.face_login.get_video_element();
+	const status = $(".face-login-status");
+
+	if (!video) {
+		const message = __("Face login screen failed to load. Please refresh the page.");
+		if (status.length) {
+			status.text(message);
+		}
+		smart_erpnext.face_login.show_error(__("Face Login"), message);
+		return;
+	}
+
 	smart_erpnext.face_login._starting = true;
 	smart_erpnext.face_login.stop_stream();
 
-	const video = document.getElementById("face-login-video");
-	const status = $(".face-login-status");
-
 	try {
-		status.text(__("Loading face scanner..."));
+		if (status.length) {
+			status.text(__("Loading face scanner..."));
+		}
 		await smart_erpnext.face.load_models();
 
-		status.text(__("Starting camera..."));
+		if (status.length) {
+			status.text(__("Starting camera..."));
+		}
 		const stream = await smart_erpnext.face.get_camera_stream();
 
+		const active_video = smart_erpnext.face_login.get_video_element();
+		if (!active_video) {
+			throw new Error(__("Camera preview is not available. Please refresh and try again."));
+		}
+
 		smart_erpnext.face_login._stream = stream;
-		video.srcObject = stream;
-		await video.play();
-		status.text(__("Position your face in the frame, then tap Scan Face."));
+		active_video.srcObject = stream;
+		await active_video.play();
+
+		if (status.length) {
+			status.text(__("Position your face in the frame, then tap Scan Face."));
+		}
 	} catch (error) {
 		const message =
 			error?.message || __("Camera access is required for face login.");
-		status.text(message);
+		if (status.length) {
+			status.text(message);
+		}
 		smart_erpnext.face_login.show_error(__("Face Login"), message);
 	} finally {
 		smart_erpnext.face_login._starting = false;
@@ -243,14 +298,19 @@ smart_erpnext.face_login.stop_stream = function () {
 		smart_erpnext.face_login._stream.getTracks().forEach((track) => track.stop());
 		smart_erpnext.face_login._stream = null;
 	}
+
+	const video = smart_erpnext.face_login.get_video_element();
+	if (video) {
+		video.srcObject = null;
+	}
 };
 
 smart_erpnext.face_login.verify = async function () {
-	const video = document.getElementById("face-login-video");
+	const video = smart_erpnext.face_login.get_video_element();
 	const status = $(".face-login-status");
 	const $button = $(".btn-face-scan");
 
-	if (!smart_erpnext.face_login._stream) {
+	if (!video || !smart_erpnext.face_login._stream) {
 		smart_erpnext.face_login.show_error(
 			__("Camera Not Ready"),
 			__("Allow camera permission and try again.")
@@ -285,7 +345,7 @@ smart_erpnext.face_login.verify = async function () {
 			method: "smart_erpnext.api.face_login.verify_and_login",
 			args: {
 				descriptor,
-				user: user || undefined,
+				user,
 			},
 			freeze: true,
 		});
@@ -331,4 +391,7 @@ $(document).on("input", "#face-login-email", () => {
 
 $(document).on("login_rendered", () => {
 	smart_erpnext.face_login.init();
+	if (window.location.hash === "#face-login") {
+		smart_erpnext.face_login.open();
+	}
 });
