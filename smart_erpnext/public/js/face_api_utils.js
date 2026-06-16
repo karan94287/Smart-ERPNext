@@ -142,9 +142,11 @@ smart_erpnext.face.get_descriptor_from_video = async function (video_element, at
 	}
 
 	if (!best_detection) {
+		smart_erpnext.face._last_detection_score = null;
 		return null;
 	}
 
+	smart_erpnext.face._last_detection_score = best_detection.detection.score;
 	return Array.from(best_detection.descriptor);
 };
 

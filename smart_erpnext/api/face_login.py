@@ -9,7 +9,8 @@ from frappe.rate_limiter import rate_limit
 from frappe.utils import slug
 
 DESCRIPTOR_LENGTH = 128
-MATCH_THRESHOLD = 0.65
+# face-api.js: same person is usually below 0.5; 0.65 was too loose and caused false logins.
+MATCH_THRESHOLD = 0.5
 
 
 def _parse_descriptor(descriptor):
@@ -94,18 +95,27 @@ def _descriptor_distance(descriptor: list[float], stored_value) -> float | None:
 	return best_distance
 
 
-def _find_best_match(descriptor: list[float], user: str | None = None) -> tuple[dict | None, float | None]:
+def _find_best_match(
+	descriptor: list[float], user: str | None = None, *, strict_user: bool = True
+) -> tuple[dict | None, float | None]:
+	if strict_user and not user:
+		return None, None
+
 	best_match = None
 	best_distance = None
+	match_distance = None
 
 	for candidate in _get_candidate_users(user):
 		distance = _descriptor_distance(descriptor, candidate.face_descriptor)
 		if distance is None:
 			continue
 
-		if distance <= MATCH_THRESHOLD and (best_distance is None or distance < best_distance):
+		if best_distance is None or distance < best_distance:
 			best_distance = distance
+
+		if distance <= MATCH_THRESHOLD and (match_distance is None or distance < match_distance):
 			best_match = candidate
+			match_distance = distance
 
 	return best_match, best_distance
 
@@ -154,24 +164,34 @@ def _registration_hint(user: str | None = None) -> str:
 def verify_and_login(descriptor, user=None):
 	"""Verify a browser-generated face descriptor and log the user in."""
 	parsed_descriptor = _parse_descriptor(descriptor)
-	resolved_user = _resolve_user(user) if user else None
 
-	if resolved_user and not frappe.db.get_value("User", resolved_user, "face_descriptor"):
+	if not (user or "").strip():
+		frappe.throw(
+			_("Enter your email or username on the face login screen before scanning."),
+			frappe.AuthenticationError,
+		)
+
+	resolved_user = _resolve_user(user)
+	if not resolved_user:
+		frappe.throw(_("User not found."), frappe.AuthenticationError)
+
+	if not frappe.db.get_value("User", resolved_user, "face_descriptor"):
 		frappe.throw(_registration_hint(resolved_user), frappe.AuthenticationError)
 
-	if not _get_candidate_users():
-		frappe.throw(_registration_hint(), frappe.AuthenticationError)
-
-	match, distance = _find_best_match(parsed_descriptor, resolved_user)
+	match, distance = _find_best_match(parsed_descriptor, resolved_user, strict_user=True)
 
 	if not match:
-		message = _("Face not recognized. Try again or use password login.")
-		if resolved_user:
-			message = _(
-				"Face not recognized for {0}. Re-register your face from the User form and try again."
-			).format(resolved_user)
-		elif distance:
-			frappe.logger().debug({"face_login_best_distance": distance, "threshold": MATCH_THRESHOLD})
+		message = _(
+			"Face does not match {0}. Only the registered person can sign in with this account."
+		).format(resolved_user)
+		if distance is not None:
+			frappe.logger().info(
+				{
+					"face_login_rejected": resolved_user,
+					"distance": round(distance, 4),
+					"threshold": MATCH_THRESHOLD,
+				}
+			)
 		frappe.throw(message, frappe.AuthenticationError)
 
 	_login_user(match.name)

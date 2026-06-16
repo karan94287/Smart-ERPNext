@@ -111,13 +111,14 @@ smart_erpnext.face_login.ensure_section = function () {
 			<div class="login-content page-card face-login-card">
 				<div class="face-login-body">
 					<div class="form-group face-login-email-wrap">
-						<label for="face-login-email">${__("Email or Username")}</label>
+						<label for="face-login-email">${__("Email or Username")} <span class="text-danger">*</span></label>
 						<input
 							type="text"
 							id="face-login-email"
 							class="form-control"
-							placeholder="${__("Optional — leave blank to match any registered user")}"
+							placeholder="${__("Enter the account you registered face login for")}"
 							autocomplete="username"
+							required
 						/>
 						<p class="help-box small text-muted face-login-hint"></p>
 					</div>
@@ -188,8 +189,8 @@ smart_erpnext.face_login.refresh_status = async function () {
 
 		hint.text(
 			user
-				? __("Face login is set up for this user.")
-				: __("Leave blank to match against all registered users.")
+				? __("Only the face registered for this account will be accepted.")
+				: __("Enter your email or username — face login is tied to that specific account.")
 		);
 	} catch (error) {
 		hint.text("");
@@ -265,13 +266,24 @@ smart_erpnext.face_login.verify = async function () {
 	status.text(__("Scanning face..."));
 
 	try {
-		const descriptor = await smart_erpnext.face.get_descriptor_from_video(video);
+		const user = smart_erpnext.face_login._get_user_hint();
+		if (!user) {
+			throw new Error(
+				__("Enter your email or username first. Face login only works for that specific account.")
+			);
+		}
+
+		const descriptor = await smart_erpnext.face.get_descriptor_from_video(video, 5);
 		if (!descriptor) {
 			throw new Error(__("No face detected. Center your face and try again."));
 		}
 
-		const user = smart_erpnext.face_login._get_user_hint();
-		status.text(__("Verifying face..."));
+		const detection_score = smart_erpnext.face._last_detection_score;
+		if (detection_score != null && detection_score < 0.7) {
+			throw new Error(__("Face not clear enough. Move closer to the camera and try again."));
+		}
+
+		status.text(__("Verifying face for {0}...", [user]));
 
 		const response = await frappe.call({
 			method: "smart_erpnext.api.face_login.verify_and_login",
